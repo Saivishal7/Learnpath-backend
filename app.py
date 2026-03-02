@@ -38,13 +38,10 @@ app.config["JWT_SECRET_KEY"] = os.environ.get(
 jwt = JWTManager(app)
 
 
-# with app.app_context():
-#     migrate_admin_columns()
 
 with app.app_context():
     init_db()
     
-    migrate_admin_columns()
 
 # ───────────────────────── HEALTH CHECK ───────────────────────── #
 
