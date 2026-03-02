@@ -23,12 +23,10 @@ app.config["JWT_SECRET_KEY"] = os.environ.get(
 
 jwt = JWTManager(app)
 
-# Restrict CORS properly in production
 CORS(app)
 
 with app.app_context():
     init_db()
-
 
 # ───────────────────────── HEALTH CHECK ───────────────────────── #
 
@@ -38,7 +36,6 @@ def home():
         "message": "LearnPath Backend is running",
         "status": "success"
     }), 200
-
 
 # ───────────────────────── AUTH ───────────────────────── #
 
@@ -68,6 +65,14 @@ def api_register():
 
     except Exception:
         return jsonify({"error": "Username already exists"}), 400
+
+
+# 🔥 DEBUG ROUTE (OUTSIDE REGISTER FUNCTION — VERY IMPORTANT)
+@app.route("/api/debug/users", methods=["GET"])
+def debug_users():
+    db = get_db()
+    users = db.execute("SELECT username FROM users").fetchall()
+    return jsonify([u["username"] for u in users])
 
 
 @app.route("/api/login", methods=["POST"])
@@ -143,7 +148,6 @@ def api_recommend():
 def api_admin_dashboard():
     claims = get_jwt()
 
-    # 🔒 Role-based protection (REAL security)
     if claims.get("role") != "admin":
         return jsonify({"error": "Admin access required"}), 403
 
