@@ -1,3 +1,15 @@
+from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask import jsonify
+from datetime import datetime, timedelta
+
+
+def admin_required():
+    user_id = get_jwt_identity()
+    db = get_db()
+    user = db.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user or user["role"] != "admin":
+        return False
+    return True
 from flask import Flask, request, jsonify
 from flask_jwt_extended import (
     JWTManager,
@@ -15,6 +27,8 @@ import os
 # ───────────────────────── APP SETUP ───────────────────────── #
 
 app = Flask(__name__)
+CORS(app)
+
 
 app.config["JWT_SECRET_KEY"] = os.environ.get(
     "JWT_SECRET_KEY",
@@ -23,13 +37,14 @@ app.config["JWT_SECRET_KEY"] = os.environ.get(
 
 jwt = JWTManager(app)
 
-CORS(app, resources={r"/api/*": {"origins": [
-    "http://127.0.0.1:5500",
-    "https://saivishal7.github.io"
-]}})
+
+# with app.app_context():
+#     migrate_admin_columns()
 
 with app.app_context():
     init_db()
+    
+    migrate_admin_columns()
 
 # ───────────────────────── HEALTH CHECK ───────────────────────── #
 
@@ -116,6 +131,27 @@ def api_login():
         "username": user["username"]
     }), 200
 
+
+@app.route("/api/profile", methods=["GET"])
+@jwt_required()
+def get_profile():
+    user_id = get_jwt_identity()
+    db = get_db()
+
+    user = db.execute(
+        "SELECT full_name, email, class_year, current_course FROM users WHERE id = ?",
+        (user_id,)
+    ).fetchone()
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    return jsonify({
+        "full_name": user["full_name"],
+        "email": user["email"],
+        "class_year": user["class_year"],
+        "current_course": user["current_course"]
+    })
 
 # ───────────────────────── RECOMMENDATION ───────────────────────── #
 
