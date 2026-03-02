@@ -7,6 +7,12 @@ from timetable import generate_timetable
 import hashlib, os
 
 app = Flask(__name__)
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({
+        "message": "LearnPath Backend is running",
+        "status": "success"
+    }), 200
 
 # JWT Configuration
 app.config["JWT_SECRET_KEY"] = os.environ.get("JWT_SECRET_KEY", "super-secret-key")
