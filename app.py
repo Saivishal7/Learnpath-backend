@@ -23,7 +23,10 @@ app.config["JWT_SECRET_KEY"] = os.environ.get(
 
 jwt = JWTManager(app)
 
-CORS(app)
+CORS(app, resources={r"/api/*": {"origins": [
+    "http://127.0.0.1:5500",
+    "https://saivishal7.github.io"
+]}})
 
 with app.app_context():
     init_db()
