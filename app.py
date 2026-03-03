@@ -1,6 +1,7 @@
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from flask import jsonify
 from datetime import datetime, timedelta
+from flask import g
 
 
 def admin_required():
@@ -18,13 +19,11 @@ from flask_jwt_extended import (
     get_jwt
 )
 from flask_cors import CORS
-from database import init_db, get_db
+from database import init_db, get_db, migrate_admin_columns
 from recommendations import get_recommendations
 from timetable import generate_timetable
 import hashlib
 import os
-from ai_service import detect_intent, extract_missing_profile, generate_recommendation
-from flask_jwt_extended import get_jwt_identity
 
 # ───────────────────────── APP SETUP ───────────────────────── #
 
@@ -37,8 +36,6 @@ CORS(
 )
 
 
-REQUIRED_FIELDS = ["grade", "weak_subject", "learning_goal", "learning_style"]
-
 app.config["JWT_SECRET_KEY"] = os.environ.get(
     "JWT_SECRET_KEY",
     "super-secret-key"  # Change this in production!
@@ -47,10 +44,9 @@ app.config["JWT_SECRET_KEY"] = os.environ.get(
 jwt = JWTManager(app)
 
 
-
 with app.app_context():
     init_db()
-    
+    migrate_admin_columns()
 
 # ───────────────────────── HEALTH CHECK ───────────────────────── #
 
@@ -80,21 +76,11 @@ def api_register():
     db = get_db()
 
     try:
-        cursor = db.execute(
+        db.execute(
             "INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'student')",
             (username, pw_hash)
         )
-
-        user_id = cursor.lastrowid
-
-        # Create empty student profile
-        db.execute(
-            "INSERT INTO students (user_id, name) VALUES (?, ?)",
-            (user_id, username)
-        )
-
         db.commit()
-
         return jsonify({"message": "Account created successfully"}), 201
 
     except Exception:
@@ -221,83 +207,7 @@ def api_admin_dashboard():
         "total_logs": total_logs
     }), 200
 
-# ───────────────────────── AI CHAT ───────────────────────── #
 
-@app.route("/api/chat", methods=["POST"])
-@jwt_required()
-def api_chat():
-
-    user_id = get_jwt_identity()
-    db = get_db()
-
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "Invalid request"}), 400
-
-    message = data.get("message", "").strip()
-    if not message:
-        return jsonify({"error": "Message required"}), 400
-
-    # Fetch student profile
-    student = db.execute(
-        "SELECT * FROM students WHERE user_id = ?",
-        (user_id,)
-    ).fetchone()
-
-    if not student:
-        return jsonify({"error": "Student profile not found"}), 404
-
-    profile = dict(student)
-
-    # Step 1: Detect intent if missing
-    if not profile.get("learning_goal"):
-        intent_data = detect_intent(message)
-
-        if intent_data:
-            db.execute(
-                "UPDATE students SET learning_goal = ? WHERE user_id = ?",
-                (intent_data.get("intent"), user_id)
-            )
-            db.commit()
-
-            return jsonify({
-                "message": "Got your goal. Can you tell me your grade and subject?"
-            })
-
-    # Step 2: Check missing fields
-    missing_fields = [
-        field for field in REQUIRED_FIELDS
-        if not profile.get(field)
-    ]
-    print("Missing fields:", missing_fields)
-
-    if missing_fields:
-        extracted_data = extract_missing_profile(
-            message,
-            missing_fields,
-            profile
-        )
-
-        if extracted_data:
-            for key, value in extracted_data.items():
-                db.execute(
-                    f"UPDATE students SET {key} = ? WHERE user_id = ?",
-                    (value, user_id)
-                )
-
-            db.commit()
-
-            return jsonify({
-                "message": "Thanks! Tell me more so I can personalize your learning path."
-            })
-
-    # Step 3: Generate recommendation
-    recommendation = generate_recommendation(profile)
-
-    return jsonify({
-        "type": "recommendation",
-        "data": recommendation
-    })
 # ───────────────────────── ERROR HANDLERS ───────────────────────── #
 
 @jwt.unauthorized_loader
@@ -319,3 +229,9 @@ def expired_token_callback(jwt_header, jwt_payload):
 
 if __name__ == "__main__":
     app.run(debug=True)
+
+    @app.teardown_appcontext
+def close_db(exception):
+    db = g.pop("db", None)
+    if db is not None:
+        db.close()

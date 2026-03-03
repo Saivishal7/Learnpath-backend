@@ -13,8 +13,7 @@ def get_db():
 
 
 def init_db():
-    db = sqlite3.connect(DATABASE)
-    db.row_factory = sqlite3.Row
+    db = get_db()
     db.executescript("""
         CREATE TABLE IF NOT EXISTS users (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,11 +53,13 @@ def init_db():
             subject    TEXT
         );
     """)
+    db.commit() 
+    
     # =========================
 # ADD THIS TO database.py
 # =========================
 
-import sqlite3
+
 
 def migrate_admin_columns():
     db = get_db()
@@ -88,4 +89,4 @@ def migrate_admin_columns():
             (admin_hash,)
         )
     db.commit()
-    db.close()
+   
