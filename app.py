@@ -45,6 +45,7 @@ app.config["JWT_SECRET_KEY"] = os.environ.get(
     "JWT_SECRET_KEY",
     "super-secret-key"  # Change this in production!
 )
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=7)
 
 jwt = JWTManager(app)
 
@@ -230,7 +231,7 @@ def api_chat():
     if not data or "message" not in data:
         return jsonify({"error": "Message required"}), 400
 
-    message = data["message"].strip()
+    message = data["message"].lower().strip()
     user_id = get_jwt_identity()
     db = get_db()
 
@@ -245,10 +246,19 @@ def api_chat():
     style = context["style"] if context else None
 
     # 1️⃣ SUBJECT STEP
-    subjects = ["mathematics", "science", "english", "history", "geography", "computer"]
-    for s in subjects:
-        if s in message:
-            subject = s.capitalize()
+    subjects = {
+        "mathematics": "Mathematics",
+        "science": "Science",
+        "english": "English",
+        "history": "History",
+        "geography": "Geography",
+        "computer": "Computer Science",
+        "computer science": "Computer Science",
+    }
+
+    for key, value in subjects.items():
+        if key in message:
+            subject = value
             goal = None
             style = None
 
@@ -259,7 +269,7 @@ def api_chat():
             db.commit()
 
             return jsonify({"message": f"Great! What is your goal for {subject}?"})
-
+        
     # 2️⃣ GOAL STEP (only if subject exists AND goal not yet set)
     if subject and not goal:
         if "exam" in message:
