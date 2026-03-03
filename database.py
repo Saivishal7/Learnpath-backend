@@ -52,6 +52,13 @@ def init_db():
             activity   TEXT,
             subject    TEXT
         );
+                      CREATE TABLE IF NOT EXISTS chat_context (
+            user_id INTEGER PRIMARY KEY,
+            subject TEXT,
+            goal TEXT,
+            style TEXT,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
     """)
     db.commit() 
     

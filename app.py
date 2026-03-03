@@ -207,6 +207,14 @@ def api_admin_dashboard():
         "total_logs": total_logs
     }), 200
 
+@app.route("/api/debug/tables")
+def debug_tables():
+    db = get_db()
+    tables = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table';"
+    ).fetchall()
+    return jsonify([t["name"] for t in tables])
+
 # ───────────────────────── CHATBOT ───────────────────────── #
 
 @app.route("/api/chat", methods=["POST"])
@@ -218,19 +226,98 @@ def api_chat():
         return jsonify({"error": "Message required"}), 400
 
     message = data["message"].lower()
+    user_id = get_jwt_identity()
+    db = get_db()
 
-    # Simple rule-based responses
-    if "hi" in message or "hello" in message:
-        return jsonify({"message": "Hello! I'm your LearnPath assistant. How can I help you today?"})
+    # Fetch stored context
+    context = db.execute(
+        "SELECT subject, goal, style FROM chat_context WHERE user_id=?",
+        (user_id,)
+    ).fetchone()
 
-    if "math" in message:
-        return jsonify({"message": "Mathematics improves with consistent practice. Would you like a study plan?"})
+    subject = context["subject"] if context else None
+    goal = context["goal"] if context else None
+    style = context["style"] if context else None
 
+    # Greeting
+    if any(word in message for word in ["hi", "hello", "hey"]):
+        return jsonify({"message": "Hello! Tell me your subject and learning goal."})
+
+    # Detect subject
+    subjects = ["mathematics", "science", "english", "history", "geography", "computer"]
+    for s in subjects:
+        if s in message:
+            subject = s.capitalize()
+            db.execute(
+                "INSERT OR REPLACE INTO chat_context (user_id, subject, goal, style) VALUES (?, ?, ?, ?)",
+                (user_id, subject, goal, style)
+            )
+            db.commit()
+            return jsonify({"message": f"Great! What is your goal for {subject}?"})
+
+    # Detect goal
     if "exam" in message:
-        return jsonify({"message": "For exams, focus on revision + practice tests. Want me to generate a schedule?"})
+        goal = "Exam preparation"
+    elif "improve" in message:
+        goal = "Improve grades"
+    elif "foundation" in message:
+        goal = "Build strong foundation"
 
-    return jsonify({"message": "Ask me about subjects, goals, or study plans!"})
+    if goal:
+        db.execute(
+            "INSERT OR REPLACE INTO chat_context (user_id, subject, goal, style) VALUES (?, ?, ?, ?)",
+            (user_id, subject, goal, style)
+        )
+        db.commit()
+        return jsonify({"message": "Nice! What learning style do you prefer? (Visual / Auditory / Reading / Kinesthetic)"})
 
+    # Detect style
+    if any(x in message for x in ["visual", "auditory", "reading", "kinesthetic"]):
+        style = message.capitalize()
+
+        db.execute(
+            "INSERT OR REPLACE INTO chat_context (user_id, subject, goal, style) VALUES (?, ?, ?, ?)",
+            (user_id, subject, goal, style)
+        )
+        db.commit()
+
+        if subject and goal and style:
+            recommendations = get_recommendations(
+                "User",
+                "Grade",
+                subject,
+                goal,
+                style
+            )
+            timetable = generate_timetable(subject, style, goal)
+
+            return jsonify({
+                "type": "recommendation",
+                "data": {
+                    "recommended_courses": recommendations,
+                    "reasoning": f"Generated plan for {subject} with {style} learning style."
+                }
+            })
+
+    # Direct study plan request
+    if "study plan" in message and subject and goal and style:
+        recommendations = get_recommendations(
+            "User",
+            "Grade",
+            subject,
+            goal,
+            style
+        )
+
+        return jsonify({
+            "type": "recommendation",
+            "data": {
+                "recommended_courses": recommendations,
+                "reasoning": f"Custom study plan for {subject}."
+            }
+        })
+
+    return jsonify({"message": "Tell me your subject, goal, and learning style to generate a personalized plan."})
 # ───────────────────────── ERROR HANDLERS ───────────────────────── #
 
 @jwt.unauthorized_loader
