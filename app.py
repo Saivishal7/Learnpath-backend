@@ -29,7 +29,12 @@ from flask_jwt_extended import get_jwt_identity
 # ───────────────────────── APP SETUP ───────────────────────── #
 
 app = Flask(__name__)
-CORS(app)
+CORS(
+    app,
+    resources={r"/api/*": {"origins": "*"}},
+    allow_headers=["Content-Type", "Authorization"],
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+)
 
 
 REQUIRED_FIELDS = ["grade", "weak_subject", "learning_goal", "learning_style"]

@@ -54,6 +54,30 @@ def init_db():
             subject    TEXT
         );
     """)
+    # =========================
+# ADD THIS TO database.py
+# =========================
+
+import sqlite3
+
+def migrate_admin_columns():
+    db = get_db()
+    columns = [row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()]
+
+    if "role" not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'student'")
+    if "created_at" not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN created_at TEXT DEFAULT CURRENT_TIMESTAMP")
+    if "last_login" not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN last_login TEXT")
+    if "total_hours" not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN total_hours REAL DEFAULT 0")
+    if "completion_percentage" not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN completion_percentage REAL DEFAULT 0")
+
+    db.commit()
+
+
 
     # Seed default admin if not exists
     admin_hash = hashlib.sha256(b"admin123").hexdigest()
