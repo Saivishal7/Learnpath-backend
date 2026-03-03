@@ -225,13 +225,18 @@ def expired_token_callback(jwt_header, jwt_payload):
     return jsonify({"error": "Token expired"}), 401
 
 
-# ───────────────────────── RUN ───────────────────────── #
 
-if __name__ == "__main__":
-    app.run(debug=True)
 
-    @app.teardown_appcontext
+
+# ───────────────────────── DB CLEANUP ───────────────────────── #
+
+@app.teardown_appcontext
 def close_db(exception):
     db = g.pop("db", None)
     if db is not None:
         db.close()
+
+# ───────────────────────── RUN ───────────────────────── #
+
+if __name__ == "__main__":
+    app.run(debug=True)
