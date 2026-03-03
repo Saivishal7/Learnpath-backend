@@ -3,3 +3,4 @@ gunicorn
 flask-jwt-extended
 flask-cors
 google-genai
+python-dotenv
