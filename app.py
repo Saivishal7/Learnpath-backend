@@ -2,6 +2,8 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from flask import jsonify
 from datetime import datetime, timedelta
 from flask import g
+import os
+import google.generativeai as genai
 
 
 def admin_required():
@@ -28,6 +30,9 @@ import os
 # ───────────────────────── APP SETUP ───────────────────────── #
 
 app = Flask(__name__)
+
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+model = genai.GenerativeModel("gemini-1.5-flash")
 CORS(
     app,
     resources={r"/api/*": {"origins": "*"}},
@@ -225,7 +230,7 @@ def api_chat():
     if not data or "message" not in data:
         return jsonify({"error": "Message required"}), 400
 
-    message = data["message"].lower().strip()
+    message = data["message"].strip()
     user_id = get_jwt_identity()
     db = get_db()
 
@@ -321,9 +326,19 @@ def api_chat():
                 "recommended_courses": recommendations,
                 "reasoning": f"Custom study plan for {subject}."
             }
+              
         })
+    
 
-    return jsonify({"message": "Tell me your subject to begin."})
+
+
+      # 🔥 GEMINI FALLBACK
+    try:
+        response = model.generate_content(message)
+        return jsonify({"message": response.text})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+     
 # ───────────────────────── ERROR HANDLERS ───────────────────────── #
 
 @jwt.unauthorized_loader
