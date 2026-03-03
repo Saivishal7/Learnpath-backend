@@ -225,11 +225,11 @@ def api_chat():
     if not data or "message" not in data:
         return jsonify({"error": "Message required"}), 400
 
-    message = data["message"].lower()
+    message = data["message"].lower().strip()
     user_id = get_jwt_identity()
     db = get_db()
 
-    # Fetch stored context
+    # Get stored context
     context = db.execute(
         "SELECT subject, goal, style FROM chat_context WHERE user_id=?",
         (user_id,)
@@ -239,67 +239,73 @@ def api_chat():
     goal = context["goal"] if context else None
     style = context["style"] if context else None
 
-    # Greeting
-    if any(word in message for word in ["hi", "hello", "hey"]):
-        return jsonify({"message": "Hello! Tell me your subject and learning goal."})
-
-    # Detect subject
+    # 1️⃣ SUBJECT STEP
     subjects = ["mathematics", "science", "english", "history", "geography", "computer"]
     for s in subjects:
         if s in message:
             subject = s.capitalize()
+            goal = None
+            style = None
+
             db.execute(
                 "INSERT OR REPLACE INTO chat_context (user_id, subject, goal, style) VALUES (?, ?, ?, ?)",
-                (user_id, subject, goal, style)
+                (user_id, subject, None, None)
             )
             db.commit()
+
             return jsonify({"message": f"Great! What is your goal for {subject}?"})
 
-    # Detect goal
-    if "exam" in message:
-        goal = "Exam preparation"
-    elif "improve" in message:
-        goal = "Improve grades"
-    elif "foundation" in message:
-        goal = "Build strong foundation"
+    # 2️⃣ GOAL STEP (only if subject exists AND goal not yet set)
+    if subject and not goal:
+        if "exam" in message:
+            goal = "Exam preparation"
+        elif "improve" in message:
+            goal = "Improve grades"
+        elif "foundation" in message:
+            goal = "Build strong foundation"
 
-    if goal:
-        db.execute(
-            "INSERT OR REPLACE INTO chat_context (user_id, subject, goal, style) VALUES (?, ?, ?, ?)",
-            (user_id, subject, goal, style)
-        )
-        db.commit()
-        return jsonify({"message": "Nice! What learning style do you prefer? (Visual / Auditory / Reading / Kinesthetic)"})
-
-    # Detect style
-    if any(x in message for x in ["visual", "auditory", "reading", "kinesthetic"]):
-        style = message.capitalize()
-
-        db.execute(
-            "INSERT OR REPLACE INTO chat_context (user_id, subject, goal, style) VALUES (?, ?, ?, ?)",
-            (user_id, subject, goal, style)
-        )
-        db.commit()
-
-        if subject and goal and style:
-            recommendations = get_recommendations(
-                "User",
-                "Grade",
-                subject,
-                goal,
-                style
+        if goal:
+            db.execute(
+                "INSERT OR REPLACE INTO chat_context (user_id, subject, goal, style) VALUES (?, ?, ?, ?)",
+                (user_id, subject, goal, None)
             )
-            timetable = generate_timetable(subject, style, goal)
+            db.commit()
 
             return jsonify({
-                "type": "recommendation",
-                "data": {
-                    "recommended_courses": recommendations,
-                    "reasoning": f"Generated plan for {subject} with {style} learning style."
-                }
+                "message": "Nice! What learning style do you prefer? (Visual / Auditory / Reading / Kinesthetic)"
             })
 
-    # Direct study plan request
+    # 3️⃣ STYLE STEP (only if subject AND goal exist AND style not set)
+    styles = ["visual", "auditory", "reading", "kinesthetic"]
+
+    if subject and goal and not style:
+        for s in styles:
+            if s in message:
+                style = s.capitalize()
+
+                db.execute(
+                    "INSERT OR REPLACE INTO chat_context (user_id, subject, goal, style) VALUES (?, ?, ?, ?)",
+                    (user_id, subject, goal, style)
+                )
+                db.commit()
+
+                recommendations = get_recommendations(
+                    "User",
+                    "Grade",
+                    subject,
+                    goal,
+                    style
+                )
+
+                return jsonify({
+                    "type": "recommendation",
+                    "data": {
+                        "recommended_courses": recommendations,
+                        "reasoning": f"Generated plan for {subject} with {style} learning style."
+                    }
+                })
+
+    # 4️⃣ STUDY PLAN REQUEST
     if "study plan" in message and subject and goal and style:
         recommendations = get_recommendations(
             "User",
@@ -317,7 +323,7 @@ def api_chat():
             }
         })
 
-    return jsonify({"message": "Tell me your subject, goal, and learning style to generate a personalized plan."})
+    return jsonify({"message": "Tell me your subject to begin."})
 # ───────────────────────── ERROR HANDLERS ───────────────────────── #
 
 @jwt.unauthorized_loader
