@@ -207,6 +207,29 @@ def api_admin_dashboard():
         "total_logs": total_logs
     }), 200
 
+# ───────────────────────── CHATBOT ───────────────────────── #
+
+@app.route("/api/chat", methods=["POST"])
+@jwt_required()
+def api_chat():
+    data = request.get_json()
+
+    if not data or "message" not in data:
+        return jsonify({"error": "Message required"}), 400
+
+    message = data["message"].lower()
+
+    # Simple rule-based responses
+    if "hi" in message or "hello" in message:
+        return jsonify({"message": "Hello! I'm your LearnPath assistant. How can I help you today?"})
+
+    if "math" in message:
+        return jsonify({"message": "Mathematics improves with consistent practice. Would you like a study plan?"})
+
+    if "exam" in message:
+        return jsonify({"message": "For exams, focus on revision + practice tests. Want me to generate a schedule?"})
+
+    return jsonify({"message": "Ask me about subjects, goals, or study plans!"})
 
 # ───────────────────────── ERROR HANDLERS ───────────────────────── #
 
