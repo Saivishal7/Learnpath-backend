@@ -38,7 +38,8 @@ app.config["JWT_SECRET_KEY"] = os.environ.get(
     "JWT_SECRET_KEY",
     "super-secret-key"  # Change this in production!
 )
-
+from datetime import timedelta
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=15)
 jwt = JWTManager(app)
 
 
@@ -92,11 +93,12 @@ def api_register():
 
         return jsonify({"message": "Account created successfully"}), 201
 
-    except Exception:
-        return jsonify({"error": "Username already exists"}), 400
+    except Exception as e:
+        print("REGISTER ERROR:", e)
+        return jsonify({"error": str(e)}), 400
 
 
-# 🔥 DEBUG ROUTE (OUTSIDE REGISTER FUNCTION — VERY IMPORTANT)
+# DEBUG ROUTE (OUTSIDE REGISTER FUNCTION — VERY IMPORTANT)
 @app.route("/api/debug/users", methods=["GET"])
 def debug_users():
     db = get_db()
@@ -244,29 +246,14 @@ def api_chat():
 
     profile = dict(student)
 
-    # Step 1: Detect intent if missing
-    if not profile.get("learning_goal"):
-        intent_data = detect_intent(message)
-
-        if intent_data:
-            db.execute(
-                "UPDATE students SET learning_goal = ? WHERE user_id = ?",
-                (intent_data.get("intent"), user_id)
-            )
-            db.commit()
-
-            return jsonify({
-                "message": "Got your goal. Can you tell me your grade and subject?"
-            })
-
-    # Step 2: Check missing fields
+    # Check missing fields
     missing_fields = [
         field for field in REQUIRED_FIELDS
         if not profile.get(field)
     ]
-    print("Missing fields:", missing_fields)
 
     if missing_fields:
+
         extracted_data = extract_missing_profile(
             message,
             missing_fields,
@@ -282,16 +269,36 @@ def api_chat():
 
             db.commit()
 
+            # reload updated profile
+            student = db.execute(
+                "SELECT * FROM students WHERE user_id = ?",
+                (user_id,)
+            ).fetchone()
+
+            profile = dict(student)
+
+        remaining_fields = [
+            field for field in REQUIRED_FIELDS
+            if not profile.get(field)
+        ]
+
+        if remaining_fields:
+            questions = {
+                "grade": "What grade are you currently in?",
+                "weak_subject": "Which subject do you want to improve?",
+                "learning_style": "How do you learn best? (visual / reading / practice)",
+                "learning_goal": "What is your learning goal?"
+            }
+
             return jsonify({
-                "message": "Thanks! Tell me more so I can personalize your learning path."
+                "message": questions[remaining_fields[0]]
             })
 
-    # Step 3: Generate recommendation
-    recommendation = generate_recommendation(profile)
+    # Generate roadmap
+    response = generate_recommendation(profile, user_message=message)
 
     return jsonify({
-        "type": "recommendation",
-        "data": recommendation
+        "message": response
     })
 # ───────────────────────── ERROR HANDLERS ───────────────────────── #
 

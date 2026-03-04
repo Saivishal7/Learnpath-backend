@@ -68,27 +68,31 @@ def extract_missing_profile(user_message, missing_fields, existing_profile):
     return safe_json_parse(text)
 
 
-def generate_recommendation(profile_data):
+def generate_recommendation(profile_data, user_message=None):
     prompt = f"""
-    Based on this student profile:
+You are an AI learning assistant helping a student.
 
-    {profile_data}
+Student profile:
+{profile_data}
 
-    Generate personalized recommendations.
+Student request:
+{user_message}
 
-    Return ONLY valid JSON:
-    {{
-        "recommended_courses": [
-            {{
-                "title": "",
-                "difficulty": "",
-                "priority": "",
-                "estimated_time_weeks": ""
-            }}
-        ],
-        "reasoning": ""
-    }}
-    """
+If the student asks to modify the roadmap or resources,
+update the recommendations accordingly.
 
+Return ONLY valid JSON:
+{{
+    "recommended_courses": [
+        {{
+            "title": "",
+            "difficulty": "",
+            "priority": "",
+            "estimated_time_weeks": ""
+        }}
+    ],
+    "reasoning": ""
+}}
+"""
     text = generate_response(prompt)
     return safe_json_parse(text)
