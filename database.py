@@ -82,6 +82,11 @@ def migrate_admin_columns():
         db.execute("ALTER TABLE users ADD COLUMN total_hours REAL DEFAULT 0")
     if "completion_percentage" not in columns:
         db.execute("ALTER TABLE users ADD COLUMN completion_percentage REAL DEFAULT 0")
+    if "full_name" not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN full_name TEXT")
+
+    if "class_year" not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN class_year TEXT")
 
     db.commit()
 
