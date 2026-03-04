@@ -9,7 +9,10 @@ import google.generativeai as genai
 def admin_required():
     user_id = get_jwt_identity()
     db = get_db()
-    user = db.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = db.execute(
+    "SELECT username, role FROM users WHERE id = ?",
+    (user_id,)
+).fetchone()
     if not user or user["role"] != "admin":
         return False
     return True
@@ -31,8 +34,13 @@ import os
 
 app = Flask(__name__)
 
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-model = genai.GenerativeModel("gemini-1.5-flash")
+api_key = os.environ.get("GEMINI_API_KEY")
+
+if api_key:
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+else:
+    model = None
 CORS(
     app,
     resources={r"/api/*": {"origins": "*"}},
@@ -143,23 +151,29 @@ def api_login():
 @app.route("/api/profile", methods=["GET"])
 @jwt_required()
 def get_profile():
-    user_id = get_jwt_identity()
-    db = get_db()
+    try:
+        user_id = get_jwt_identity()
+        db = get_db()
 
-    user = db.execute(
-        "SELECT full_name, email, class_year, current_course FROM users WHERE id = ?",
-        (user_id,)
-    ).fetchone()
+        user = db.execute(
+    "SELECT username, full_name, email, class_year, current_course FROM users WHERE id = ?",
+    (user_id,)
+).fetchone()
 
-    if not user:
-        return jsonify({"error": "User not found"}), 404
+        if not user:
+            return jsonify({"error": "User not found"}), 404
 
-    return jsonify({
-        "full_name": user["full_name"],
-        "email": user["email"],
-        "class_year": user["class_year"],
-        "current_course": user["current_course"]
-    })
+        return jsonify({
+             "username": user["username"],
+            "full_name": user["full_name"],
+            "email": user["email"],
+            "class_year": user["class_year"],
+            "current_course": user["current_course"]
+        })
+
+    except Exception as e:
+        print("PROFILE ERROR:", e)
+        return jsonify({"error": str(e)}), 500
 
 # ───────────────────────── RECOMMENDATION ───────────────────────── #
 
@@ -176,6 +190,21 @@ def api_recommend():
     subject = data.get("subject", "Mathematics")
     goal = data.get("goal", "Improve grades")
     style = data.get("style", "Visual")
+    user_id = get_jwt_identity()
+    db = get_db()
+    user = db.execute(
+    "SELECT id FROM users WHERE id=?",
+    (user_id,)
+).fetchone()
+
+    if not user:
+     return jsonify({"error": "User not found"}), 404
+
+    db.execute(
+    "UPDATE users SET full_name=?, class_year=? WHERE id=?",
+    (name, grade, user_id)
+)
+    db.commit()
 
     recommendations = get_recommendations(
         name, grade, subject, goal, style
