@@ -13,8 +13,7 @@ def get_db():
 
 
 def init_db():
-    db = sqlite3.connect(DATABASE)
-    db.row_factory = sqlite3.Row
+    db = get_db()
     db.executescript("""
         CREATE TABLE IF NOT EXISTS users (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,7 +52,45 @@ def init_db():
             activity   TEXT,
             subject    TEXT
         );
+                      CREATE TABLE IF NOT EXISTS chat_context (
+            user_id INTEGER PRIMARY KEY,
+            subject TEXT,
+            goal TEXT,
+            style TEXT,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        );
     """)
+    db.commit() 
+    
+    # =========================
+# ADD THIS TO database.py
+# =========================
+
+
+
+def migrate_admin_columns():
+    db = get_db()
+    columns = [row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()]
+
+    if "role" not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'student'")
+    if "created_at" not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN created_at TEXT DEFAULT CURRENT_TIMESTAMP")
+    if "last_login" not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN last_login TEXT")
+    if "total_hours" not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN total_hours REAL DEFAULT 0")
+    if "completion_percentage" not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN completion_percentage REAL DEFAULT 0")
+    if "full_name" not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN full_name TEXT")
+
+    if "class_year" not in columns:
+        db.execute("ALTER TABLE users ADD COLUMN class_year TEXT")
+
+    db.commit()
+
+
 
     # Seed default admin if not exists
     admin_hash = hashlib.sha256(b"admin123").hexdigest()
@@ -64,4 +101,4 @@ def init_db():
             (admin_hash,)
         )
     db.commit()
-    db.close()
+   

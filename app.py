@@ -1,12 +1,18 @@
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from flask import jsonify
 from datetime import datetime, timedelta
+from flask import g
+import os
+import google.generativeai as genai
 
 
 def admin_required():
     user_id = get_jwt_identity()
     db = get_db()
-    user = db.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+    user = db.execute(
+    "SELECT username, role FROM users WHERE id = ?",
+    (user_id,)
+).fetchone()
     if not user or user["role"] != "admin":
         return False
     return True
@@ -18,21 +24,30 @@ from flask_jwt_extended import (
     get_jwt
 )
 from flask_cors import CORS
-from database import init_db, get_db
+from database import init_db, get_db, migrate_admin_columns
 from recommendations import get_recommendations
 from timetable import generate_timetable
 import hashlib
 import os
-from ai_service import detect_intent, extract_missing_profile, generate_recommendation
-from flask_jwt_extended import get_jwt_identity
 
 # ───────────────────────── APP SETUP ───────────────────────── #
 
 app = Flask(__name__)
-CORS(app)
 
+api_key = os.environ.get("GEMINI_API_KEY")
 
-REQUIRED_FIELDS = ["grade", "weak_subject", "learning_goal", "learning_style"]
+if api_key:
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("gemini-1.5-flash")
+else:
+    model = None
+CORS(
+    app,
+    resources={r"/api/*": {"origins": "*"}},
+    allow_headers=["Content-Type", "Authorization"],
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+)
+
 
 app.config["JWT_SECRET_KEY"] = os.environ.get(
     "JWT_SECRET_KEY",
@@ -40,13 +55,14 @@ app.config["JWT_SECRET_KEY"] = os.environ.get(
 )
 from datetime import timedelta
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=15)
-jwt = JWTManager(app)
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=7)
 
+jwt = JWTManager(app)
 
 
 with app.app_context():
     init_db()
-    
+    migrate_admin_columns()
 
 # ───────────────────────── HEALTH CHECK ───────────────────────── #
 
@@ -76,21 +92,11 @@ def api_register():
     db = get_db()
 
     try:
-        cursor = db.execute(
+        db.execute(
             "INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'student')",
             (username, pw_hash)
         )
-
-        user_id = cursor.lastrowid
-
-        # Create empty student profile
-        db.execute(
-            "INSERT INTO students (user_id, name) VALUES (?, ?)",
-            (user_id, username)
-        )
-
         db.commit()
-
         return jsonify({"message": "Account created successfully"}), 201
 
     except Exception as e:
@@ -148,23 +154,29 @@ def api_login():
 @app.route("/api/profile", methods=["GET"])
 @jwt_required()
 def get_profile():
-    user_id = get_jwt_identity()
-    db = get_db()
+    try:
+        user_id = get_jwt_identity()
+        db = get_db()
 
-    user = db.execute(
-        "SELECT full_name, email, class_year, current_course FROM users WHERE id = ?",
-        (user_id,)
-    ).fetchone()
+        user = db.execute(
+    "SELECT username, full_name, email, class_year, current_course FROM users WHERE id = ?",
+    (user_id,)
+).fetchone()
 
-    if not user:
-        return jsonify({"error": "User not found"}), 404
+        if not user:
+            return jsonify({"error": "User not found"}), 404
 
-    return jsonify({
-        "full_name": user["full_name"],
-        "email": user["email"],
-        "class_year": user["class_year"],
-        "current_course": user["current_course"]
-    })
+        return jsonify({
+             "username": user["username"],
+            "full_name": user["full_name"],
+            "email": user["email"],
+            "class_year": user["class_year"],
+            "current_course": user["current_course"]
+        })
+
+    except Exception as e:
+        print("PROFILE ERROR:", e)
+        return jsonify({"error": str(e)}), 500
 
 # ───────────────────────── RECOMMENDATION ───────────────────────── #
 
@@ -181,6 +193,21 @@ def api_recommend():
     subject = data.get("subject", "Mathematics")
     goal = data.get("goal", "Improve grades")
     style = data.get("style", "Visual")
+    user_id = get_jwt_identity()
+    db = get_db()
+    user = db.execute(
+    "SELECT id FROM users WHERE id=?",
+    (user_id,)
+).fetchone()
+
+    if not user:
+     return jsonify({"error": "User not found"}), 404
+
+    db.execute(
+    "UPDATE users SET full_name=?, class_year=? WHERE id=?",
+    (name, grade, user_id)
+)
+    db.commit()
 
     recommendations = get_recommendations(
         name, grade, subject, goal, style
@@ -218,33 +245,48 @@ def api_admin_dashboard():
         "total_logs": total_logs
     }), 200
 
-# ───────────────────────── AI CHAT ───────────────────────── #
+@app.route("/api/debug/tables")
+def debug_tables():
+    db = get_db()
+    tables = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table';"
+    ).fetchall()
+    return jsonify([t["name"] for t in tables])
+
+# ───────────────────────── CHATBOT ───────────────────────── #
 
 @app.route("/api/chat", methods=["POST"])
 @jwt_required()
 def api_chat():
+    data = request.get_json()
 
+    if not data or "message" not in data:
+        return jsonify({"error": "Message required"}), 400
+
+    message = data["message"].lower().strip()
     user_id = get_jwt_identity()
     db = get_db()
 
-    data = request.get_json()
-    if not data:
-        return jsonify({"error": "Invalid request"}), 400
-
-    message = data.get("message", "").strip()
-    if not message:
-        return jsonify({"error": "Message required"}), 400
-
-    # Fetch student profile
-    student = db.execute(
-        "SELECT * FROM students WHERE user_id = ?",
+    # Get stored context
+    context = db.execute(
+        "SELECT subject, goal, style FROM chat_context WHERE user_id=?",
         (user_id,)
     ).fetchone()
 
-    if not student:
-        return jsonify({"error": "Student profile not found"}), 404
+    subject = context["subject"] if context else None
+    goal = context["goal"] if context else None
+    style = context["style"] if context else None
 
-    profile = dict(student)
+    # 1️⃣ SUBJECT STEP
+    subjects = {
+        "mathematics": "Mathematics",
+        "science": "Science",
+        "english": "English",
+        "history": "History",
+        "geography": "Geography",
+        "computer": "Computer Science",
+        "computer science": "Computer Science",
+    }
 
     # Check missing fields
     missing_fields = [
@@ -259,15 +301,69 @@ def api_chat():
             missing_fields,
             profile
         )
+    for key, value in subjects.items():
+        if key in message:
+            subject = value
+            goal = None
+            style = None
 
-        if extracted_data:
-            for key, value in extracted_data.items():
+            db.execute(
+                "INSERT OR REPLACE INTO chat_context (user_id, subject, goal, style) VALUES (?, ?, ?, ?)",
+                (user_id, subject, None, None)
+            )
+            db.commit()
+
+            return jsonify({"message": f"Great! What is your goal for {subject}?"})
+        
+    # 2️⃣ GOAL STEP (only if subject exists AND goal not yet set)
+    if subject and not goal:
+        if "exam" in message:
+            goal = "Exam preparation"
+        elif "improve" in message:
+            goal = "Improve grades"
+        elif "foundation" in message:
+            goal = "Build strong foundation"
+
+        if goal:
+            db.execute(
+                "INSERT OR REPLACE INTO chat_context (user_id, subject, goal, style) VALUES (?, ?, ?, ?)",
+                (user_id, subject, goal, None)
+            )
+            db.commit()
+
+            return jsonify({
+                "message": "Nice! What learning style do you prefer? (Visual / Auditory / Reading / Kinesthetic)"
+            })
+
+    # 3️⃣ STYLE STEP (only if subject AND goal exist AND style not set)
+    styles = ["visual", "auditory", "reading", "kinesthetic"]
+
+    if subject and goal and not style:
+        for s in styles:
+            if s in message:
+                style = s.capitalize()
+
                 db.execute(
-                    f"UPDATE students SET {key} = ? WHERE user_id = ?",
-                    (value, user_id)
+                    "INSERT OR REPLACE INTO chat_context (user_id, subject, goal, style) VALUES (?, ?, ?, ?)",
+                    (user_id, subject, goal, style)
+                )
+                db.commit()
+
+                recommendations = get_recommendations(
+                    "User",
+                    "Grade",
+                    subject,
+                    goal,
+                    style
                 )
 
-            db.commit()
+                return jsonify({
+                    "type": "recommendation",
+                    "data": {
+                        "recommended_courses": recommendations,
+                        "reasoning": f"Generated plan for {subject} with {style} learning style."
+                    }
+                })
 
             # reload updated profile
             student = db.execute(
@@ -300,6 +396,35 @@ def api_chat():
     return jsonify({
         "message": response
     })
+    # 4️⃣ STUDY PLAN REQUEST
+    if "study plan" in message and subject and goal and style:
+        recommendations = get_recommendations(
+            "User",
+            "Grade",
+            subject,
+            goal,
+            style
+        )
+
+        return jsonify({
+            "type": "recommendation",
+            "data": {
+                "recommended_courses": recommendations,
+                "reasoning": f"Custom study plan for {subject}."
+            }
+              
+        })
+    
+
+
+
+      # 🔥 GEMINI FALLBACK
+    try:
+        response = model.generate_content(message)
+        return jsonify({"message": response.text})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+     
 # ───────────────────────── ERROR HANDLERS ───────────────────────── #
 
 @jwt.unauthorized_loader
@@ -316,6 +441,17 @@ def invalid_token_callback(err):
 def expired_token_callback(jwt_header, jwt_payload):
     return jsonify({"error": "Token expired"}), 401
 
+
+
+
+
+# ───────────────────────── DB CLEANUP ───────────────────────── #
+
+@app.teardown_appcontext
+def close_db(exception):
+    db = g.pop("db", None)
+    if db is not None:
+        db.close()
 
 # ───────────────────────── RUN ───────────────────────── #
 
